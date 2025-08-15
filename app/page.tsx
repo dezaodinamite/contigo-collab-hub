@@ -22,6 +22,9 @@ import {
 } from '@/lib/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import CodeApplicationProgress, { type CodeApplicationState } from '@/components/CodeApplicationProgress';
+import ProjectSelector from '@/components/ProjectSelector';
+import NewProjectModal from '@/components/NewProjectModal';
+import { Project, ProjectCreateRequest } from '@/types/project';
 
 interface SandboxData {
   sandboxId: string;
@@ -51,7 +54,7 @@ export default function AISandboxPage() {
   const [promptInput, setPromptInput] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
-      content: 'Welcome! I can help you generate code with full context of your sandbox files and structure. Just start chatting - I\'ll automatically create a sandbox for you if needed!\n\nTip: If you see package errors like "react-router-dom not found", just type "npm install" or "check packages" to automatically install missing packages.',
+      content: 'Bem-vindo ao Agrega Commerce AI Editor! Posso ajudá-lo a desenvolver soluções de e-commerce e logística com IA. Comece conversando - criarei automaticamente um sandbox para você se necessário!\n\nDica: Se você vir erros de pacotes como "react-router-dom not found", basta digitar "npm install" ou "check packages" para instalar automaticamente os pacotes ausentes.',
       type: 'system',
       timestamp: new Date()
     }
@@ -85,6 +88,10 @@ export default function AISandboxPage() {
   const [loadingStage, setLoadingStage] = useState<'gathering' | 'planning' | 'generating' | null>(null);
   const [sandboxFiles, setSandboxFiles] = useState<Record<string, string>>({});
   const [fileStructure, setFileStructure] = useState<string>('');
+  
+  // Project management states
+  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   
   const [conversationContext, setConversationContext] = useState<{
     scrapedWebsites: Array<{ url: string; content: any; timestamp: Date }>;
@@ -133,6 +140,174 @@ export default function AISandboxPage() {
     files: [],
     lastProcessedPosition: 0
   });
+
+  // Project management functions
+  const handleProjectSelect = async (project: Project) => {
+    setCurrentProject(project);
+    
+    // Load project data
+    if (project.conversation.context) {
+      setConversationContext({
+        scrapedWebsites: project.conversation.context.scrapedWebsites.map(ws => ({
+          ...ws,
+          timestamp: new Date(ws.timestamp)
+        })),
+        generatedComponents: project.conversation.context.generatedComponents,
+        appliedCode: project.conversation.context.appliedCode.map(ac => ({
+          ...ac,
+          timestamp: new Date(ac.timestamp)
+        })),
+        currentProject: project.conversation.context.currentProject,
+        lastGeneratedCode: project.conversation.context.lastGeneratedCode
+      });
+    }
+
+    // Load chat messages
+    if (project.conversation.messages) {
+      setChatMessages(project.conversation.messages.map(msg => ({
+        content: msg.content,
+        type: msg.role === 'user' ? 'user' : 'ai',
+        timestamp: new Date(msg.timestamp),
+        metadata: msg.metadata
+      })));
+    }
+
+    // Load files if they exist
+    if (project.files && Object.keys(project.files).length > 0) {
+      setSandboxFiles(
+        Object.fromEntries(
+          Object.entries(project.files).map(([path, file]) => [path, file.content])
+        )
+      );
+    }
+
+    // Set AI model from project settings
+    if (project.settings?.aiModel) {
+      setAiModel(project.settings.aiModel);
+    }
+
+    // Update URL with project ID
+    const params = new URLSearchParams(searchParams);
+    params.set('project', project.id);
+    router.push(`/?${params.toString()}`);
+  };
+
+  const handleNewProject = () => {
+    setShowNewProjectModal(true);
+  };
+
+  const handleCreateProject = async (projectData: ProjectCreateRequest) => {
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(projectData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create project');
+      }
+
+      const newProject = await response.json();
+      setCurrentProject(newProject);
+      setShowNewProjectModal(false);
+
+      // Initialize with new project data
+      setConversationContext({
+        scrapedWebsites: [],
+        generatedComponents: [],
+        appliedCode: [],
+        currentProject: newProject.name,
+        lastGeneratedCode: undefined
+      });
+
+      setChatMessages([
+        {
+          content: `Projeto "${newProject.name}" criado com sucesso! Comece a desenvolver seu projeto de ${projectData.category === 'ecommerce' ? 'e-commerce' : projectData.category === 'logistics' ? 'logística' : projectData.category === 'fullcommerce' ? 'full commerce' : 'comércio'} com a ajuda da IA.`,
+          type: 'system',
+          timestamp: new Date()
+        }
+      ]);
+
+      // Update URL with project ID
+      const params = new URLSearchParams(searchParams);
+      params.set('project', newProject.id);
+      router.push(`/?${params.toString()}`);
+    } catch (error) {
+      console.error('Failed to create project:', error);
+    }
+  };
+
+  const saveProjectState = async () => {
+    if (!currentProject) return;
+
+    try {
+      const updatedProject = {
+        ...currentProject,
+        lastModified: Date.now(),
+        conversation: {
+          messages: chatMessages.map(msg => ({
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            role: msg.type === 'user' ? 'user' : 'assistant',
+            content: msg.content,
+            timestamp: msg.timestamp.getTime(),
+            metadata: msg.metadata
+          })),
+          context: {
+            scrapedWebsites: conversationContext.scrapedWebsites.map(ws => ({
+              ...ws,
+              timestamp: ws.timestamp.getTime()
+            })),
+            generatedComponents: conversationContext.generatedComponents,
+            appliedCode: conversationContext.appliedCode.map(ac => ({
+              ...ac,
+              timestamp: ac.timestamp.getTime()
+            })),
+            currentProject: conversationContext.currentProject,
+            lastGeneratedCode: conversationContext.lastGeneratedCode
+          }
+        },
+        files: Object.fromEntries(
+          Object.entries(sandboxFiles).map(([path, content]) => [
+            path,
+            {
+              content,
+              lastModified: Date.now(),
+              type: path.endsWith('.jsx') || path.endsWith('.js') ? 'component' :
+                    path.endsWith('.css') ? 'style' :
+                    path.endsWith('.json') ? 'config' : 'other'
+            }
+          ])
+        ),
+        settings: {
+          ...currentProject.settings,
+          aiModel: aiModel
+        }
+      };
+
+      await fetch(`/api/projects/${currentProject.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedProject),
+      });
+
+      setCurrentProject(updatedProject);
+    } catch (error) {
+      console.error('Failed to save project state:', error);
+    }
+  };
+
+  // Auto-save project state
+  useEffect(() => {
+    if (currentProject && currentProject.settings?.autoSave) {
+      const interval = setInterval(saveProjectState, 30000); // Save every 30 seconds
+      return () => clearInterval(interval);
+    }
+  }, [currentProject, chatMessages, conversationContext, sandboxFiles, aiModel]);
 
   // Clear old conversation data on component mount and create/restore sandbox
   useEffect(() => {
@@ -2786,43 +2961,64 @@ Focus on the key sections and content, making it clean and modern.`;
           
           {/* Header */}
           <div className="absolute top-0 left-0 right-0 z-20 px-6 py-4 flex items-center justify-between animate-[fadeIn_0.8s_ease-out]">
-            <img
-              src="/firecrawl-logo-with-fire.webp"
-              alt="Firecrawl"
-              className="h-8 w-auto"
-            />
-            <a 
-              href="https://github.com/mendableai/open-lovable" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-[#36322F] text-white px-3 py-2 rounded-[10px] text-sm font-medium [box-shadow:inset_0px_-2px_0px_0px_#171310,_0px_1px_6px_0px_rgba(58,_33,_8,_58%)] hover:translate-y-[1px] hover:scale-[0.98] hover:[box-shadow:inset_0px_-1px_0px_0px_#171310,_0px_1px_3px_0px_rgba(58,_33,_8,_40%)] active:translate-y-[2px] active:scale-[0.97] active:[box-shadow:inset_0px_1px_1px_0px_#171310,_0px_1px_2px_0px_rgba(58,_33,_8,_30%)] transition-all duration-200"
-            >
-              <FiGithub className="w-4 h-4" />
-              <span>Use this template</span>
-            </a>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold text-lg">A</span>
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold text-gray-900">Agrega Commerce AI Editor</h1>
+                  <p className="text-xs text-gray-600">Full Commerce Development Platform</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <ProjectSelector
+                onProjectSelect={handleProjectSelect}
+                onNewProject={handleNewProject}
+                currentProjectId={currentProject?.id}
+              />
+              <a 
+                href="https://agrega.com.br" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-[#36322F] text-white px-3 py-2 rounded-[10px] text-sm font-medium [box-shadow:inset_0px_-2px_0px_0px_#171310,_0px_1px_6px_0px_rgba(58,_33,_8,_58%)] hover:translate-y-[1px] hover:scale-[0.98] hover:[box-shadow:inset_0px_-1px_0px_0px_#171310,_0px_1px_3px_0px_rgba(58,_33,_8,_40%)] active:translate-y-[2px] active:scale-[0.97] active:[box-shadow:inset_0px_1px_1px_0px_#171310,_0px_1px_2px_0px_rgba(58,_33,_8,_30%)] transition-all duration-200"
+              >
+                <span>Agrega.com.br</span>
+              </a>
+            </div>
           </div>
           
           {/* Main content */}
-          <div className="relative z-10 h-full flex items-center justify-center px-4">
+          <div className="relative z-10 h-full flex items-center justify-center px-4 bg-agrega-hero">
             <div className="text-center max-w-4xl min-w-[600px] mx-auto">
-              {/* Firecrawl-style Header */}
-              <div className="text-center">
-                <h1 className="text-[2.5rem] lg:text-[3.8rem] text-center text-[#36322F] font-semibold tracking-tight leading-[0.9] animate-[fadeIn_0.8s_ease-out]">
-                  <span className="hidden md:inline">Open Lovable</span>
-                  <span className="md:hidden">Open Lovable</span>
+              {/* Agrega Commerce AI Editor Header */}
+              <div className="text-center mb-8">
+                <div className="flex justify-center mb-8">
+                  <div className="relative">
+                    <img 
+                      src="/agrega-logo.svg" 
+                      alt="Agrega Commerce" 
+                      className="h-24 md:h-32 lg:h-40 mx-auto animate-[fadeIn_0.6s_ease-out] drop-shadow-lg"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-br from-orange-400/20 to-blue-400/20 rounded-full blur-xl animate-pulse"></div>
+                  </div>
+                </div>
+                <h1 className="text-[3rem] lg:text-[4.5rem] xl:text-[5rem] text-center font-bold tracking-tight leading-[0.9] animate-[fadeIn_0.8s_ease-out] mb-4">
+                  <span className="bg-gradient-to-r from-orange-500 to-blue-600 bg-clip-text text-transparent">AI Editor</span>
                 </h1>
                 <motion.p 
-                  className="text-base lg:text-lg max-w-lg mx-auto mt-2.5 text-zinc-500 text-center text-balance"
+                  className="text-lg lg:text-xl max-w-2xl mx-auto mt-4 text-agrega-gray-light text-center text-balance leading-relaxed"
                   animate={{
                     opacity: showStyleSelector ? 0.7 : 1
                   }}
                   transition={{ duration: 0.3, ease: "easeOut" }}
                 >
-                  Re-imagine any website, in seconds.
+                  Desenvolva soluções de e-commerce e logística com IA em segundos. Clone qualquer site e transforme em uma aplicação React moderna.
                 </motion.p>
               </div>
               
-              <form onSubmit={handleHomeScreenSubmit} className="mt-5 max-w-3xl mx-auto">
+              <form onSubmit={handleHomeScreenSubmit} className="mt-8 max-w-3xl mx-auto">
                 <div className="w-full relative group">
                   <input
                     type="text"
@@ -2842,8 +3038,8 @@ Focus on the key sections and content, making it clean and modern.`;
                       }
                     }}
                     placeholder=" "
-                    aria-placeholder="https://firecrawl.dev"
-                    className="h-[3.25rem] w-full resize-none focus-visible:outline-none focus-visible:ring-orange-500 focus-visible:ring-2 rounded-[18px] text-sm text-[#36322F] px-4 pr-12 border-[.75px] border-border bg-white"
+                    aria-placeholder="https://exemplo.com"
+                    className="h-[3.25rem] w-full resize-none focus-visible:outline-none focus-visible:ring-agrega-orange focus-visible:ring-2 rounded-[18px] text-sm text-agrega-gray px-4 pr-12 border-[.75px] border-border bg-white"
                     style={{
                       boxShadow: '0 0 0 1px #e3e1de66, 0 1px 2px #5f4a2e14, 0 4px 6px #5f4a2e0a, 0 40px 40px -24px #684b2514',
                       filter: 'drop-shadow(rgba(249, 224, 184, 0.3) -0.731317px -0.731317px 35.6517px)'
@@ -2856,14 +3052,14 @@ Focus on the key sections and content, making it clean and modern.`;
                       homeUrlInput ? 'opacity-0' : 'opacity-100'
                     }`}
                   >
-                    <span className="text-[#605A57]/50" style={{ fontFamily: 'monospace' }}>
-                      https://firecrawl.dev
+                    <span className="text-agrega-gray-light" style={{ fontFamily: 'monospace' }}>
+                      https://exemplo.com
                     </span>
                   </div>
                   <button
                     type="submit"
                     disabled={!homeUrlInput.trim()}
-                    className="absolute top-1/2 transform -translate-y-1/2 right-2 flex h-10 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="absolute top-1/2 transform -translate-y-1/2 right-2 flex h-10 items-center justify-center rounded-md px-3 text-sm font-medium text-agrega-orange hover:text-agrega-orange-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agrega-orange focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title={selectedStyle ? `Clone with ${selectedStyle} Style` : 'Clone Website'}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
@@ -2971,30 +3167,32 @@ Focus on the key sections and content, making it clean and modern.`;
               </form>
               
               {/* Model Selector */}
-              <div className="mt-6 flex items-center justify-center animate-[fadeIn_1s_ease-out]">
-                <select
-                  value={aiModel}
-                  onChange={(e) => {
-                    const newModel = e.target.value;
-                    setAiModel(newModel);
-                    const params = new URLSearchParams(searchParams);
-                    params.set('model', newModel);
-                    if (sandboxData?.sandboxId) {
-                      params.set('sandbox', sandboxData.sandboxId);
-                    }
-                    router.push(`/?${params.toString()}`);
-                  }}
-                  className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#36322F] focus:border-transparent"
-                  style={{
-                    boxShadow: '0 0 0 1px #e3e1de66, 0 1px 2px #5f4a2e14'
-                  }}
-                >
-                  {appConfig.ai.availableModels.map(model => (
-                    <option key={model} value={model}>
-                      {appConfig.ai.modelDisplayNames[model] || model}
-                    </option>
-                  ))}
-                </select>
+              <div className="mt-8 flex items-center justify-center animate-[fadeIn_1s_ease-out]">
+                <div className="flex items-center gap-2 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl px-4 py-2 shadow-lg hover:shadow-xl transition-all duration-200">
+                  <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <select
+                    value={aiModel}
+                    onChange={(e) => {
+                      const newModel = e.target.value;
+                      setAiModel(newModel);
+                      const params = new URLSearchParams(searchParams);
+                      params.set('model', newModel);
+                      if (sandboxData?.sandboxId) {
+                        params.set('sandbox', sandboxData.sandboxId);
+                      }
+                      router.push(`/?${params.toString()}`);
+                    }}
+                    className="bg-transparent border-none outline-none text-sm font-medium text-gray-700 focus:ring-0"
+                  >
+                    {appConfig.ai.availableModels.map(model => (
+                      <option key={model} value={model}>
+                        {appConfig.ai.modelDisplayNames[model] || model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -3003,11 +3201,9 @@ Focus on the key sections and content, making it clean and modern.`;
       
       <div className="bg-card px-4 py-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <img
-            src="/firecrawl-logo-with-fire.webp"
-            alt="Firecrawl"
-            className="h-8 w-auto"
-          />
+          <div className="flex items-center gap-2">
+            <img src="/agrega-icon.svg" alt="Agrega" className="w-6 h-6" />
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Model Selector - Left side */}
@@ -3023,7 +3219,7 @@ Focus on the key sections and content, making it clean and modern.`;
               }
               router.push(`/?${params.toString()}`);
             }}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#36322F] focus:border-transparent"
+            className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-[10px] focus:outline-none focus:ring-2 focus:ring-agrega-orange focus:border-transparent"
           >
             {appConfig.ai.availableModels.map(model => (
               <option key={model} value={model}>
@@ -3035,7 +3231,7 @@ Focus on the key sections and content, making it clean and modern.`;
             variant="code"
             onClick={() => createSandbox()}
             size="sm"
-            title="Create new sandbox"
+            title="Criar novo sandbox"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -3045,7 +3241,7 @@ Focus on the key sections and content, making it clean and modern.`;
             variant="code"
             onClick={reapplyLastGeneration}
             size="sm"
-            title="Re-apply last generation"
+            title="Re-aplicar última geração"
             disabled={!conversationContext.lastGeneratedCode || !sandboxData}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3057,13 +3253,13 @@ Focus on the key sections and content, making it clean and modern.`;
             onClick={downloadZip}
             disabled={!sandboxData}
             size="sm"
-            title="Download your Vite app as ZIP"
+            title="Baixar seu app Vite como ZIP"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
             </svg>
           </Button>
-          <div className="inline-flex items-center gap-2 bg-[#36322F] text-white px-3 py-1.5 rounded-[10px] text-sm font-medium [box-shadow:inset_0px_-2px_0px_0px_#171310,_0px_1px_6px_0px_rgba(58,_33,_8,_58%)]">
+          <div className="inline-flex items-center gap-2 bg-agrega-blue text-white px-3 py-1.5 rounded-[10px] text-sm font-medium shadow-lg">
             <span id="status-text">{status.text}</span>
             <div className={`w-2 h-2 rounded-full ${status.active ? 'bg-green-500' : 'bg-gray-500'}`} />
           </div>
@@ -3311,7 +3507,7 @@ Focus on the key sections and content, making it clean and modern.`;
             <div className="relative">
               <Textarea
                 className="min-h-[60px] pr-12 resize-y border-2 border-black focus:outline-none"
-                placeholder=""
+                placeholder="Descreva o que você quer criar ou modificar..."
                 value={aiChatInput}
                 onChange={(e) => setAiChatInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -3325,7 +3521,7 @@ Focus on the key sections and content, making it clean and modern.`;
               <button
                 onClick={sendChatMessage}
                 className="absolute right-2 bottom-2 p-2 bg-[#36322F] text-white rounded-[10px] hover:bg-[#4a4542] [box-shadow:inset_0px_-2px_0px_0px_#171310,_0px_1px_6px_0px_rgba(58,_33,_8,_58%)] hover:translate-y-[1px] hover:scale-[0.98] hover:[box-shadow:inset_0px_-1px_0px_0px_#171310,_0px_1px_3px_0px_rgba(58,_33,_8,_40%)] active:translate-y-[2px] active:scale-[0.97] active:[box-shadow:inset_0px_1px_1px_0px_#171310,_0px_1px_2px_0px_rgba(58,_33,_8,_30%)] transition-all duration-200"
-                title="Send message (Enter)"
+                title="Enviar mensagem (Enter)"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
@@ -3347,7 +3543,7 @@ Focus on the key sections and content, making it clean and modern.`;
                       ? 'bg-black text-white' 
                       : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
-                  title="Code"
+                  title="Código"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -3360,7 +3556,7 @@ Focus on the key sections and content, making it clean and modern.`;
                       ? 'bg-black text-white' 
                       : 'text-gray-300 hover:text-white hover:bg-gray-700'
                   }`}
-                  title="Preview"
+                  title="Visualização"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -3379,17 +3575,17 @@ Focus on the key sections and content, making it clean and modern.`;
                     </div>
                   )}
                   <div className={`inline-flex items-center justify-center whitespace-nowrap rounded-[10px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-[#36322F] text-white hover:bg-[#36322F] [box-shadow:inset_0px_-2px_0px_0px_#171310,_0px_1px_6px_0px_rgba(58,_33,_8,_58%)] hover:translate-y-[1px] hover:scale-[0.98] hover:[box-shadow:inset_0px_-1px_0px_0px_#171310,_0px_1px_3px_0px_rgba(58,_33,_8,_40%)] active:translate-y-[2px] active:scale-[0.97] active:[box-shadow:inset_0px_1px_1px_0px_#171310,_0px_1px_2px_0px_rgba(58,_33,_8,_30%)] disabled:shadow-none disabled:hover:translate-y-0 disabled:hover:scale-100 h-8 px-3 py-1 text-sm gap-2`}>
-                    {generationProgress.isGenerating ? (
-                      <>
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
-                        {generationProgress.isEdit ? 'Editing code' : 'Live code generation'}
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-2 h-2 bg-gray-500 rounded-full" />
-                        COMPLETE
-                      </>
-                    )}
+                                          {generationProgress.isGenerating ? (
+                        <>
+                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                          {generationProgress.isEdit ? 'Editando código' : 'Geração de código ao vivo'}
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-2 h-2 bg-gray-500 rounded-full" />
+                          CONCLUÍDO
+                        </>
+                      )}
                   </div>
                 </div>
               )}
@@ -3421,8 +3617,12 @@ Focus on the key sections and content, making it clean and modern.`;
         </div>
       </div>
 
-
-
+      {/* New Project Modal */}
+      <NewProjectModal
+        isOpen={showNewProjectModal}
+        onClose={() => setShowNewProjectModal(false)}
+        onCreateProject={handleCreateProject}
+      />
 
     </div>
   );

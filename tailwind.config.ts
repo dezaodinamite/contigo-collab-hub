@@ -50,6 +50,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        agrega: {
+          orange: "hsl(var(--agrega-orange))",
+          "orange-dark": "hsl(var(--agrega-orange-dark))",
+          blue: "hsl(var(--agrega-blue))",
+          "blue-dark": "hsl(var(--agrega-blue-dark))",
+          gray: "hsl(var(--agrega-gray))",
+          "gray-light": "hsl(var(--agrega-gray-light))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

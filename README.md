@@ -1,17 +1,30 @@
-# Open Lovable
+# Agrega Commerce AI Editor
 
-Chat with AI to build React apps instantly. An example app made by the [Firecrawl](https://firecrawl.dev/?ref=open-lovable-github) team. For a complete cloud solution, check out [Lovable.dev ❤️](https://lovable.dev/).
+Desenvolva soluções de e-commerce e logística com IA em segundos. Uma plataforma completa de desenvolvimento full commerce criada pela [Agrega](https://agrega.com.br).
+
+## Sobre a Agrega
+
+A Agrega é uma empresa especializada em full commerce, oferecendo soluções integradas de e-commerce e logística para empresas de todos os tamanhos. Nossa plataforma combina tecnologia de ponta com experiência de mercado para criar soluções que impulsionam o crescimento dos negócios.
 
 <img src="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbmZtaHFleGRsMTNlaWNydGdianI4NGQ4dHhyZjB0d2VkcjRyeXBucCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZFVLWMa6dVskQX0qu1/giphy.gif" alt="Open Lovable Demo" width="100%"/>
 
 
 
+## Funcionalidades
+
+- **Desenvolvimento com IA**: Crie aplicações React completas conversando com IA
+- **Gerenciamento de Projetos**: Salve e retome seus projetos de onde parou
+- **Categorias Especializadas**: Templates otimizados para e-commerce, logística e full commerce
+- **Web Scraping Inteligente**: Analise sites existentes para criar clones ou inspirações
+- **Preview em Tempo Real**: Veja suas mudanças instantaneamente
+- **Exportação de Código**: Baixe seu projeto como ZIP
+
 ## Setup
 
 1. **Clone & Install**
 ```bash
-git clone https://github.com/mendableai/open-lovable.git
-cd open-lovable
+git clone https://github.com/agrega/agrega-commerce-ai-editor.git
+cd agrega-commerce-ai-editor
 npm install
 ```
 
